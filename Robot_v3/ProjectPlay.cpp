@@ -19,7 +19,9 @@ static ColumnVector Atom_q0(6);
 bool ProjectPlay::gAtom_RestFinish = true;
 int ProjectPlay::MotorControlSwitch = 1;
 static TwinCAT_COM *TWCAT;  // TwinCAT Class宣告
-std::vector<Matrix> TrajAllQ;   // 跑軌跡用的矩陣  Nx6 ,N = ;
+std::vector<Matrix> TrajAllQ;   // 跑軌跡用的矩陣  Nx6 ,N = ;  角度
+std::vector<Matrix> TrajAllQd;   // 跑軌跡用的矩陣  Nx6 ,N = ;  角速度
+std::vector<Matrix> TrajAllQdd;   // 跑軌跡用的矩陣  Nx6 ,N = ;  角加速度
 Matrix ResetAtomTraj;
 std::vector<ColumnVector> TrajSetPt;//  設定一個一個點 規劃每個點之間的軌跡
 std::vector<float> TrajTimes; // Trajectory 每一個set的時間
@@ -98,8 +100,8 @@ Matrix Atom_qRestAll;   //  reset 用的 delta q 慢慢撿回去
 
 bool ATomThreadClose = false;
 bool ForceSensorThreadClose = false;
-const int Atom_RedunctionRate[] = {200,250,200,250,200,300};  //  黑金剛Encoder Count ratio +-改變方向
-const int Atom_MotorCountRatio[] = {4*512,4*512,4*512,4*512,4*512,4*512};  //  黑金剛Encoder Count ratio +-改變方向
+const float Atom_RedunctionRate[] = {200,250,200,250,200,300};  //  黑金剛Encoder Count ratio +-改變方向
+const float Atom_MotorCountRatio[] = {4*512,4*512,4*512,4*512,4*512,4*512};  //  黑金剛Encoder Count ratio +-改變方向
 const float ATom_MotorTorqueConst[] = {39.8, 39.8, 37.83,37.83,37.83,32.1}; // Torque const mNm/A
 const float ATom_MotorPeakCurrent[] = {6,6,2,2,2,1}; // Peak Current A
 
@@ -107,7 +109,7 @@ std::vector<std::vector<float>> SaveALLTimes;
 std::vector<std::vector<float>> SaveALLRefq;   //  Output Reference Theta
 std::vector<std::vector<float>> SaveALLRefqd;   //  Output Reference Theta dot
 std::vector<std::vector<float>> SaveALLRefqdd;   //  Output Reference theta ddot
-std::vector<std::vector<float>> SaveALLRefTor;   //  Output Reference Torque
+std::vector<std::vector<float>> SaveALLRefTorque;   //  Output Reference Torque
 std::vector<std::vector<float>> SaveALLFeedbackq;   //  Output feedback theta
 std::vector<std::vector<float>> SaveALLFeedbackqd;   //  Output feedback theta dot
 std::vector<std::vector<float>> SaveALLFeedbackqdd;   //  Output feedback theta ddot
@@ -118,7 +120,7 @@ void AllSaveFileClear()
 	SaveALLRefq.clear();
 	SaveALLRefqd.clear();
 	SaveALLRefqdd.clear();
-	SaveALLRefTor.clear();
+	SaveALLRefTorque.clear();
 	SaveALLFeedbackq.clear();
 	SaveALLFeedbackqd.clear();
 	SaveALLFeedbackqdd.clear();
@@ -131,27 +133,41 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 	// ALL save File initial
 	AllSaveFileClear();
 
-	ColumnVector qn(gAtom_DOF);
+	ColumnVector qn(6);    //  q now
+	ColumnVector qdn(6);    //  q dot now
+	ColumnVector Torn(6);     // Torque now
 	// Trajectory big matrix to each sub columnvector 
 	ColumnVector TrajtempQ(6);
+	ColumnVector TrajtempQd(6);
+	ColumnVector TrajtempQdd(6);
 	////  小綠 Initial set command matrix
 	//float *Command;
 	//Command = new float [6];
 	// TwinCAT initial  matrix
 	static long set_position[6];
+	static long set_velocity[6];
+	static long set_torque[6];
 	static long read_position[6];
 	static long read_velocity[6];
 	static short read_tor[6];
 	for(int k=0;k<6;k++){read_tor[k]=0;read_position[k]=0;read_velocity[k]=0;}  //  initial feedback Position torque
 	// initial 去跟回來的矩陣 q qd qdd torque 去=Reference,回來=Feedback
 	std::vector<float> _tempRefq;
+	std::vector<float> _tempRefqd;
+	std::vector<float> _tempRefqdd;
+	std::vector<float> _tempRefTorque;
 	std::vector<float> _tempFeedbackq;
 	std::vector<float> _tempFeedbackqd;
-	std::vector<float> _tempFeedbackqdd;
 	std::vector<float> _tempFeedbackTorque;
 	//  Other parameters
 	int TrajRowCount = 1;  // 連續軌跡時計算每組要丟幾個點
 	int TrajSetpointCount = 0;  // 連續軌跡 有幾組
+	// Torque control參數 kv kp
+	// Control
+	DiagonalMatrix Kp(6), Kv(6);
+	Kp = 10;   //  q error
+	Kv = 20;   //  qdot error
+	Computed_torque_method AtomCTM(robot_atom,Kp,Kv);
 	////   Thread Start
 	while(1)
 	{
@@ -160,16 +176,70 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 		case 1: //  Position control
 			qn = robot_atom.get_available_q();
 			// ------- 送出去 -----
-			_tempRefq.clear();
+			//_tempRefq.clear();
 			for (int i=0;i<6;i++)
 			{
-				set_position[i]=(qn(i+1))/(2*M_PI)*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i];  //  4*512 = count ratio = 2Pi
-				_tempRefq.push_back((float)qn(i+1));
+				set_position[i]=(qn(i+1))*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]/(2*M_PI);  //  4*512 = count ratio = 2Pi
+				//_tempRefq.push_back((float)qn(i+1));
 			}
-			SaveALLRefq.push_back(_tempRefq);   //  存檔用
+			//SaveALLRefq.push_back(_tempRefq);   //  存檔用
 			if (Atom_Motorsend)
 			{			
 				TWCAT->EtherCATSetEncoder_iPOS(set_position);
+				TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
+				//TCatIoInputUpdate( TASK_ARM_CST_PORTNUMBER );
+				//// -------  回回回來來來來 -----
+				//TWCAT->EtherCATReadTorque_iPOS(read_tor);
+				//TWCAT->EtherCATReadVelocity_iPOS(read_velocity);
+				//TWCAT->EtherCATReadEncoder_iPOS(read_position);
+				////  存檔
+				//_tempFeedbackq.clear();_tempFeedbackqd.clear();_tempFeedbackTorque.clear();
+				//for (int i=0;i<6;i++){
+				//	_tempFeedbackq.push_back(read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i]);  // Unit: Rad
+				//	_tempFeedbackqd.push_back(read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536));  //Unit Rad/s
+				//	_tempFeedbackTorque.push_back(read_tor[i]*2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i]*ATom_MotorTorqueConst[i]/65520);  // Unit mNm
+				//}
+				//SaveALLFeedbackq.push_back(_tempFeedbackq);
+				//SaveALLFeedbackqd.push_back(_tempFeedbackqd);
+				//SaveALLFeedbackTorque.push_back(_tempFeedbackTorque);
+			}
+			break;
+		case 2: // Continuous Torque Feedback Control (Trajectory)
+			if (TrajSetpointCount != TrajAllQd.size())
+			{
+				if (TrajRowCount!=TrajAllQd[TrajSetpointCount].size()/6)
+				{
+					TrajtempQdd = TrajAllQdd[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					TrajtempQd = TrajAllQd[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					TrajtempQ = TrajAllQ[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					Torn =  AtomCTM.torque_cmd(robot_atom, TrajtempQ, TrajtempQd, TrajtempQdd)*1000;  //mNm
+					TrajRowCount++;
+				}
+				else   // 丟完一組Trajectory Matrix 丟下一組 所以TrajSetpointCount++
+				{
+					TrajRowCount = 1;  // 一組軌跡裡面有幾個Row
+					TrajSetpointCount++;
+				}
+			}
+			else
+			{
+				cout<<"丟完嚕~~~~"<<endl;
+				TrajRowCount = 1;
+				TrajSetpointCount = 0;
+				ProjectPlay::MotorControlSwitch = 1;
+				break;
+			} 
+			// ------- 送出去 -----
+			_tempRefTorque.clear();
+			for (int i=0;i<6;i++)
+			{    
+				set_torque[i]= Torn(i+1)*65520/(2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i]*ATom_MotorTorqueConst[i]);
+				_tempRefTorque.push_back((float)Torn(i+1));
+			}
+			SaveALLRefTorque.push_back(_tempRefTorque);   //  存檔用
+			if (Atom_Motorsend)
+			{			
+				TWCAT->EtherCATSetTorque_iPOS(set_torque);
 				TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 				TCatIoInputUpdate( TASK_ARM_CST_PORTNUMBER );
 				// -------  回回回來來來來 -----
@@ -180,23 +250,25 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 				_tempFeedbackq.clear();_tempFeedbackqd.clear();_tempFeedbackTorque.clear();
 				for (int i=0;i<6;i++){
 					_tempFeedbackq.push_back(read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i]);  // Unit: Rad
-					_tempFeedbackqd.push_back(read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i])/0.001);  //Unit Rad/s
-					_tempFeedbackTorque.push_back(read_tor[i]);  // Unit Nm
+					_tempFeedbackqd.push_back(read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536));  //Unit Rad/s
+					_tempFeedbackTorque.push_back(read_tor[i]*2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i]*ATom_MotorTorqueConst[i]/65520);  // Unit mNm
+					qn(i+1) = read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i];
+					qdn(i+1) = read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536);
 				}
+				robot_atom.set_q(qn);robot_atom.set_qp(qdn);
+
 				SaveALLFeedbackq.push_back(_tempFeedbackq);
 				SaveALLFeedbackqd.push_back(_tempFeedbackqd);
 				SaveALLFeedbackTorque.push_back(_tempFeedbackTorque);
 			}
 			break;
-		case 2: // Torque control
-			break;
-		case 3: // Velocity control
-			break;
-		case 4: // continuous position control (Trajectory)
-			if (TrajSetpointCount != TrajAllQ.size())
+		case 3: // Continuous Velocity Control (Trajectory)
+			if (TrajSetpointCount != TrajAllQd.size())
 			{
-				if (TrajRowCount!=TrajAllQ[TrajSetpointCount].size()/6)
+				if (TrajRowCount!=TrajAllQd[TrajSetpointCount].size()/6)
 				{
+					TrajtempQd = TrajAllQd[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					robot_atom.set_qp(TrajtempQd);
 					TrajtempQ = TrajAllQ[TrajSetpointCount].row(TrajRowCount).AsColumn();
 					robot_atom.set_q(TrajtempQ);
 					TrajRowCount++;
@@ -215,15 +287,79 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 				ProjectPlay::MotorControlSwitch = 1;
 				break;
 			}
-			// ------- 送出去 -----
 			qn = robot_atom.get_available_q();
+			qdn = robot_atom.get_available_qp();   //給速度
+			// ------- 送出去 -----
 			_tempRefq.clear();
+			_tempRefqd.clear();
 			for (int i=0;i<6;i++)
 			{
-				set_position[i]=(qn(i+1))/(2*M_PI)*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i];  //  4*512 = count ratio = 2Pi
+				set_velocity[i]=(qdn(i+1))*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536/(2*M_PI);  //  4*512 = count ratio = 2Pi
 				_tempRefq.push_back((float)qn(i+1));
+				_tempRefqd.push_back((float)qdn(i+1));
+
 			}
 			SaveALLRefq.push_back(_tempRefq);   //  存檔用
+			SaveALLRefqd.push_back(_tempRefqd);   //  存檔用
+			if (Atom_Motorsend)
+			{			
+				TWCAT->EtherCATSetVelocity_iPOS(set_velocity);
+				TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
+				TCatIoInputUpdate( TASK_ARM_CST_PORTNUMBER );
+				// -------  回回回來來來來 -----
+				TWCAT->EtherCATReadTorque_iPOS(read_tor);
+				TWCAT->EtherCATReadVelocity_iPOS(read_velocity);
+				TWCAT->EtherCATReadEncoder_iPOS(read_position);
+				//  存檔
+				_tempFeedbackq.clear();_tempFeedbackqd.clear();_tempFeedbackTorque.clear();
+				for (int i=0;i<6;i++){
+					_tempFeedbackq.push_back(read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i]);  // Unit: Rad
+					_tempFeedbackqd.push_back(read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536));  //Unit Rad/s
+					_tempFeedbackTorque.push_back(read_tor[i]*2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i]*ATom_MotorTorqueConst[i]/65520);  // Unit mNm
+				}
+				SaveALLFeedbackq.push_back(_tempFeedbackq);
+				SaveALLFeedbackqd.push_back(_tempFeedbackqd);
+				SaveALLFeedbackTorque.push_back(_tempFeedbackTorque);
+			}
+			break;
+		case 4: // Continuous Position Control (Trajectory)
+			if (TrajSetpointCount != TrajAllQ.size())
+			{
+				if (TrajRowCount!=TrajAllQ[TrajSetpointCount].size()/6)
+				{
+					TrajtempQ = TrajAllQ[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					robot_atom.set_q(TrajtempQ);
+					TrajtempQd = TrajAllQd[TrajSetpointCount].row(TrajRowCount).AsColumn();
+					robot_atom.set_qp(TrajtempQd);
+					TrajRowCount++;
+				}
+				else   // 丟完一組Trajectory Matrix 丟下一組 所以TrajSetpointCount++
+				{
+					TrajRowCount = 1;  // 一組軌跡裡面有幾個Row
+					TrajSetpointCount++;
+				}
+			}
+			else
+			{
+				cout<<"丟完嚕~~~~"<<endl;
+				TrajRowCount = 1;
+				TrajSetpointCount = 0;
+				ProjectPlay::MotorControlSwitch = 1;
+				break;
+			}
+			qn = robot_atom.get_available_q();
+			qdn = robot_atom.get_available_qp();
+			// ------- 送出去 -----
+			_tempRefq.clear();
+			_tempRefqd.clear();
+			for (int i=0;i<6;i++)
+			{
+				set_position[i]=(qn(i+1))*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]/(2*M_PI);  //  4*512 = count ratio = 2Pi
+				_tempRefq.push_back((float)qn(i+1));
+				_tempRefqd.push_back((float)qdn(i+1));
+			}
+			SaveALLRefq.push_back(_tempRefq);   //  存檔用
+			SaveALLRefqd.push_back(_tempRefqd);
 			if (Atom_Motorsend)  // 馬達丟指令
 			{
 				TWCAT->EtherCATSetEncoder_iPOS(set_position);
@@ -236,12 +372,9 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 				//  存檔
 				_tempFeedbackq.clear();_tempFeedbackqd.clear();_tempFeedbackTorque.clear();
 				for (int i=0;i<6;i++){
-					read_position[i] = read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i];
-					read_velocity[i] = read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i])/0.001;
-					read_tor[i] = read_tor[i]/65520*2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i];
-					_tempFeedbackq.push_back(read_position[i]);  // Unit: Rad
-					_tempFeedbackqd.push_back(read_velocity[i]);  //Unit Rad/s
-					_tempFeedbackTorque.push_back(read_tor[i]);  // Unit Nm
+					_tempFeedbackq.push_back(read_position[i]*(2*M_PI)/Atom_RedunctionRate[i]/Atom_MotorCountRatio[i]);  // Unit: Rad
+					_tempFeedbackqd.push_back(read_velocity[i]*(2*M_PI)/(Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]*0.001*65536));  //Unit Rad/s
+					_tempFeedbackTorque.push_back(read_tor[i]*2*ATom_MotorPeakCurrent[i]*Atom_RedunctionRate[i]*ATom_MotorTorqueConst[i]/65520);  // Unit mNm
 				}
 				SaveALLFeedbackq.push_back(_tempFeedbackq);
 				SaveALLFeedbackqd.push_back(_tempFeedbackqd);
@@ -265,7 +398,7 @@ DWORD WINAPI Thread_Atom_motor( LPVOID lpParam )
 			qn = robot_atom.get_available_q();
 			// ------- 送出去 -----
 			for (int i=0;i<6;i++)
-				set_position[i]=(qn(i+1))/(2*M_PI)*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i];  //  4*512 = count ratio = 2Pi
+				set_position[i]=(qn(i+1))*Atom_RedunctionRate[i]*Atom_MotorCountRatio[i]/(2*M_PI);  //  4*512 = count ratio = 2Pi
 			if (Atom_Motorsend)  // 馬達丟指令
 			{			
 				TWCAT->EtherCATSetEncoder_iPOS(set_position);
@@ -782,9 +915,12 @@ void ProjectPlay::Project_SaveFile()
 {
 	FileIO(SaveALLTimes,"TrajAllTimes.txt");
 	FileIO(SaveALLRefq,"Reference_q.txt");
+	FileIO(SaveALLRefqd,"Reference_qd.txt");
+	FileIO(SaveALLRefTorque,"Reference_Torque.txt");
 	FileIO(SaveALLFeedbackq,"Feedback_q.txt");
-	FileIO(SaveALLFeedbackqd,"Feedbackk_qd.txt");
+	FileIO(SaveALLFeedbackqd,"Feedback_qd.txt");
 	FileIO(SaveALLFeedbackTorque,"Feedback_Torque.txt");
+
 }
 void ProjectPlay::Project_test()
 {
@@ -802,27 +938,13 @@ void ProjectPlay::Project_test()
 }
 void ProjectPlay::Atom_TrajectoryGO()
 {
-	//ColumnVector qn;
-	//int TrajSetcount = TrajAllQ.size();
-	////
-	//for (int i=0;i<TrajSetcount;i++)
-	//{
-	//	for (int j=0;j<TrajAllQ[i].size()/6;j++)
-	//	{
-	//		qn = TrajAllQ[i].row(j+1).AsColumn();
-	//		cout<<qn.AsRow()<<endl;
-	//	}
-	//}
-
-	//Atom_Reset();
-	//cout<<TrajAllQ.size()-1<<endl;
 	AllSaveFileClear();
-	MotorControlSwitch = 4;
+	MotorControlSwitch = 4; // 2: Torque  3: Velocity  4: Position
 }
 void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 {
 	TrajectoryPlanning mTrajectoryPlanning;
-	Matrix TrajQ;
+	Matrix TrajQ,TrajQd,TrajQdd;
 	ColumnVector qf(6),q0(6);
 	for (int i=0;i<6;i++){
 		qf(i+1) = thetaAll[i];  //  thetaALL 裝進columnvector
@@ -840,7 +962,7 @@ void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 	q0 = TrajSetPt[tf-2];
 	//  Eigen TrajectoryPlanning function
 	Eigen::VectorXd eigq0(6),eigqf(6),eigqfd(6);
-	Eigen::MatrixXd EigTraj;
+	Eigen::MatrixXd EigTraj, EigTrajQd, EigTrajQdd;
 	eigqfd<<0,0,0,0,0,0;
 	//  將每個SetPoint的times以及Types存出來
 	std::vector<float> _tempTimeTypes;
@@ -854,12 +976,18 @@ void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 		for (int i=0;i<6;i++)
 		{eigq0(i) = q0(i+1);eigqf(i) = qf(i+1);}
 		EigTraj = mTrajectoryPlanning.Splines212(eigq0,eigqfd,eigqf,eigqfd,(float)times,1);
+		EigTrajQd = mTrajectoryPlanning.Splines212(eigq0,eigqfd,eigqf,eigqfd,(float)times,2);
+		EigTrajQdd = mTrajectoryPlanning.Splines212(eigq0,eigqfd,eigqf,eigqfd,(float)times,3);
 		TrajQ = Matrix(EigTraj.rows(),EigTraj.cols());
+		TrajQd = Matrix(EigTrajQd.rows(),EigTrajQd.cols());
+		TrajQdd = Matrix(EigTrajQdd.rows(),EigTrajQdd.cols());
 		for (int i=0;i<EigTraj.rows();i++)
 		{
 			for (int j=0;j<EigTraj.cols();j++)
 			{
 				TrajQ(i+1,j+1) = (float)EigTraj(i,j);
+				TrajQd(i+1,j+1) = (float)EigTrajQd(i,j);
+				TrajQdd(i+1,j+1) = (float)EigTrajQdd(i,j);
 			}
 		}
 		break;
@@ -867,12 +995,18 @@ void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 		for (int i=0;i<6;i++)
 		{eigq0(i) = q0(i+1);eigqf(i) = qf(i+1);}
 		EigTraj = mTrajectoryPlanning.Splines434(eigq0,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,times,1);
+		EigTrajQd = mTrajectoryPlanning.Splines434(eigq0,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,times,2);
+		EigTrajQdd = mTrajectoryPlanning.Splines434(eigq0,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,times,3);
 		TrajQ = Matrix(EigTraj.rows(),EigTraj.cols());
+		TrajQd = Matrix(EigTrajQd.rows(),EigTrajQd.cols());
+		TrajQdd = Matrix(EigTrajQdd.rows(),EigTrajQdd.cols());
 		for (int i=0;i<EigTraj.rows();i++)
 		{
 			for (int j=0;j<EigTraj.cols();j++)
 			{
 				TrajQ(i+1,j+1) = (float)EigTraj(i,j);
+				TrajQd(i+1,j+1) = (float)EigTrajQd(i,j);
+				TrajQdd(i+1,j+1) = (float)EigTrajQdd(i,j);
 			}
 		}
 		break;
@@ -880,12 +1014,18 @@ void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 		for (int i=0;i<6;i++)
 		{eigq0(i) = q0(i+1);eigqf(i) = qf(i+1);}
 		EigTraj = mTrajectoryPlanning.Splines535(eigq0,eigqfd,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,eigqfd,times,1);
+		EigTrajQd = mTrajectoryPlanning.Splines535(eigq0,eigqfd,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,eigqfd,times,2);
+		EigTrajQdd = mTrajectoryPlanning.Splines535(eigq0,eigqfd,eigqfd,eigqfd,eigqf,eigqfd,eigqfd,eigqfd,times,3);
 		TrajQ = Matrix(EigTraj.rows(),EigTraj.cols());
+		TrajQd = Matrix(EigTrajQd.rows(),EigTrajQd.cols());
+		TrajQdd = Matrix(EigTrajQdd.rows(),EigTrajQdd.cols());
 		for (int i=0;i<EigTraj.rows();i++)
 		{
 			for (int j=0;j<EigTraj.cols();j++)
 			{
 				TrajQ(i+1,j+1) = (float)EigTraj(i,j);
+				TrajQd(i+1,j+1) = (float)EigTrajQd(i,j);
+				TrajQdd(i+1,j+1) = (float)EigTrajQdd(i,j);
 			}
 		}
 		break;
@@ -893,23 +1033,35 @@ void ProjectPlay::Atom_Setpoint(float thetaAll[6],float times,int types)
 		for (int i=0;i<6;i++)
 		{eigq0(i) = q0(i+1);eigqf(i) = qf(i+1);}
 		EigTraj = mTrajectoryPlanning.CubicPolynomials(eigq0,eigqfd,eigqf,eigqfd,times,1);
+		EigTrajQd = mTrajectoryPlanning.CubicPolynomials(eigq0,eigqfd,eigqf,eigqfd,times,2);
+		EigTrajQdd = mTrajectoryPlanning.CubicPolynomials(eigq0,eigqfd,eigqf,eigqfd,times,3);
 		TrajQ = Matrix(EigTraj.rows(),EigTraj.cols());
+		TrajQd = Matrix(EigTrajQd.rows(),EigTrajQd.cols());
+		TrajQdd = Matrix(EigTrajQdd.rows(),EigTrajQdd.cols());
 		for (int i=0;i<EigTraj.rows();i++)
 		{
 			for (int j=0;j<EigTraj.cols();j++)
 			{
 				TrajQ(i+1,j+1) = (float)EigTraj(i,j);
+				TrajQd(i+1,j+1) = (float)EigTrajQd(i,j);
+				TrajQdd(i+1,j+1) = (float)EigTrajQdd(i,j);
 			}
 		}
 		break;
 	case 4:   // line
-		TrajQ = robot_straight(q0,qf,robot_atom,times);
+		TrajQ = robot_straight(q0,qf,robot_atom,times,1);
+		TrajQd = robot_straight(q0,qf,robot_atom,times,2);
+		TrajQdd = robot_straight(q0,qf,robot_atom,times,3);
 		break;
-	case 5:   //  jTraj given q0,qf,time = output(Matrix q, qd, qdd)
+	case 5:   //  jTraj given q0,qf,time = output(Matrix q, qd, qdd)  5階多項式
 		TrajQ = robot_jTray(q0,qf,tout,1);
+		TrajQd = robot_jTray(q0,qf,tout,2);
+		TrajQdd = robot_jTray(q0,qf,tout,3);
 		break;
 	}
 	TrajAllQ.push_back(TrajQ);
+	TrajAllQd.push_back(TrajQd);
+	TrajAllQdd.push_back(TrajQdd);
 }
 void ProjectPlay::Atom_TrajClear()
 {
@@ -922,7 +1074,7 @@ void ProjectPlay::Atom_TrajClear()
 	TrajTypes.push_back(0);
 }
 
-ReturnMatrix ProjectPlay::robot_straight(ColumnVector q0,ColumnVector qf, Robot &_robot, float times)
+ReturnMatrix ProjectPlay::robot_straight(ColumnVector q0,ColumnVector qf, Robot &_robot, float times,int Selec)
 {
 	TrajectoryPlanning mTrajectoryPlanning;
 	Matrix qs;
@@ -970,7 +1122,7 @@ ReturnMatrix ProjectPlay::robot_straight(ColumnVector q0,ColumnVector qf, Robot 
 		}
 	}
 
-	EigTraj = mTrajectoryPlanning.Splines212(eigq0,eigqfd,eigqf,eigqfd,Qvia,times,1);
+	EigTraj = mTrajectoryPlanning.Splines212(eigq0,eigqfd,eigqf,eigqfd,Qvia,times,Selec);
 	qs = Matrix(EigTraj.rows(),EigTraj.cols());
 	for (int i=0;i<EigTraj.rows();i++)
 	{

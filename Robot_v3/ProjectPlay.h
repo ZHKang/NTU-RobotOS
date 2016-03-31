@@ -61,7 +61,7 @@ public:
 	// --- Trajectory ---
 public:
 	ReturnMatrix robot_jTray(ColumnVector q0, ColumnVector qf, ColumnVector time, int Selec);
-	ReturnMatrix robot_straight(ColumnVector q0,ColumnVector qf,Robot &_robot, float times);
+	ReturnMatrix robot_straight(ColumnVector q0,ColumnVector qf,Robot &_robot, float times,int Selec);
 	void foo(Robot foo_robot,map<float,ColumnVector>& m1, Matrix T0,Matrix Tf,ColumnVector q0fix);
 	void Atom_TrajectoryGO();
 	void Atom_Setpoint(float thetaAll[6],float times,int types);

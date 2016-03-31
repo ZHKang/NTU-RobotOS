@@ -94,6 +94,7 @@ BEGIN_MESSAGE_MAP(AtomJointCtL, CDialogEx)
 	ON_BN_CLICKED(IDC_AtomReset, &AtomJointCtL::OnBnClickedAtomreset)
 END_MESSAGE_MAP()
 
+
 // AtomJointCtL 訊息處理常式
 void AtomJointCtL::AtomControlInit()
 {
@@ -121,6 +122,7 @@ void AtomJointCtL::AtomControlInit()
 	Atom_CarAll[3] = Rxyz0(1);
 	Atom_CarAll[4] = Rxyz0(2);
 	Atom_CarAll[5] = Rxyz0(3);
+
 	///////////  秀在cedit box上
 	CString str;
 	str.Format("%.1f",theta[0]);
@@ -1109,5 +1111,5 @@ void AtomJointCtL::OnBnClickedAtomreset()
 	// TODO: 在此加入控制項告知處理常式程式碼
 	ProjectPlay mProjectPlay;
 	mProjectPlay.Atom_Reset();
-	UpdateData(true);
+	UpdateData(TRUE);
 }

@@ -94,7 +94,6 @@ void ATomTrajForm::OnBnClickedAtomset()
 	times = atof(str);  //  string to float
 	setpointcount++;
 	//////////////////////////////////////////////////////
-	AtomJointCtL mAtomJointCtL;
 	CString setPointstring,TrajType;
 	int index_ = IDC_AtomTrajSelec.GetCurSel();
 	IDC_AtomTrajSelec.GetLBText(index_,TrajType);
@@ -102,15 +101,15 @@ void ATomTrajForm::OnBnClickedAtomset()
 		setpointcount,
 		TrajType,
 		times,
-		mAtomJointCtL.Atom_CarAll[0],
-		mAtomJointCtL.Atom_CarAll[1],
-		mAtomJointCtL.Atom_CarAll[2],
-		mAtomJointCtL.Atom_CarAll[3],
-		mAtomJointCtL.Atom_CarAll[4],
-		mAtomJointCtL.Atom_CarAll[5]);
+		AtomJointCtL::Atom_CarAll[0],
+		AtomJointCtL::Atom_CarAll[1],
+		AtomJointCtL::Atom_CarAll[2],
+		AtomJointCtL::Atom_CarAll[3],
+		AtomJointCtL::Atom_CarAll[4],
+		AtomJointCtL::Atom_CarAll[5]);
 
 	CListBox_AtomSetPoint.AddString(setPointstring);
-	mProject.Atom_Setpoint(mAtomJointCtL.Atom_thetaALL,times,index_);
+	mProject.Atom_Setpoint(AtomJointCtL::Atom_thetaALL,times,index_);
 	////////////////////////////////////////////////////
 	//COpenGLControl mOpenGLControl;
 	//mOpenGLControl.Draw_sphere(0.05,mAtomJointCtL.Atom_CarAll[0],mAtomJointCtL.Atom_CarAll[1],mAtomJointCtL.Atom_CarAll[2]);

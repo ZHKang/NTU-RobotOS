@@ -37,9 +37,6 @@ TwinCAT_COM::TwinCAT_COM(void)
 	******************************************************************/
 	EtherCATInit_iPOS(); // Control_Word = 6 ---> 7
 
-	cout<<"Press Any Key to Start Homing!"<<endl;
-	system("pause");
-
 	//還沒有Homing，以後再寫
 	//EtherCATHoming_iPOS(); // Control_Word =  15 ---> 31 ---> 15
 	EtherCATSetCST_iPOS(); // Control_Word =  15 ---> 10
@@ -499,7 +496,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	******************************************************************************************/
 
 	/*******************Set 1st Axis*********************/
-	pTARM1msOut->Control_Word_01=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_01=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -516,7 +513,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	cout<<endl;
 
 	/*******************Set 2nd Axis*********************/
-	pTARM1msOut->Control_Word_02=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_02=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -533,7 +530,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	cout<<endl;
 
 	/*******************Set 3rd Axis*********************/
-	pTARM1msOut->Control_Word_03=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_03=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -550,7 +547,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	cout<<endl;
 
 	/*******************Set 4th Axis*********************/
-	pTARM1msOut->Control_Word_04=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_04=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -567,7 +564,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	cout<<endl;
 
 	/*******************Set 5th Axis*********************/
-	pTARM1msOut->Control_Word_05=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_05=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -584,7 +581,7 @@ void TwinCAT_COM::EtherCATSetCST_iPOS(void)
 	cout<<endl;
 
 	/*******************Set 6th Axis*********************/
-	pTARM1msOut->Control_Word_06=15; // Switch on + Enable poperation = 15
+	pTARM1msOut->Control_Word_06=15; // Switch on + Enable operation = 15
 	TCatIoOutputUpdate( TASK_ARM_CST_PORTNUMBER );
 	Sleep(500);
 	
@@ -717,7 +714,7 @@ void TwinCAT_COM::EtherCATSetVelocity_iPOS(long* buf)
 	// 將指標陣列儲存的數值透過TwinCAT I/O 進行指定Target Encoder動作
 	   須將TwinCAT I/O Output 部分進行update才會開始動作
 
-	   Velocity[rad] = (2*pi*Velocity[IU]) / (4*Encoder_lines*0.001)
+	   Velocity[rad] = (2*pi*Velocity[IU]) / (4*Encoder_lines*0.001*65536)
 	******************************************************************/
 	long AxisEnable[6]={1,1,1,1,1,1};
 	
